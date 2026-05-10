@@ -1,32 +1,43 @@
 # SHL Assessment Recommender
 
-FastAPI service for the SHL AI Intern take-home assignment. It accepts a stateless conversation history and returns the next assistant reply plus a structured shortlist of SHL assessment recommendations.
+A FastAPI-based conversational recommender system for selecting SHL assessments from the official SHL product catalog.
 
-The service is catalog-grounded: recommendations are selected only from the local SHL product catalog JSON, and every returned URL comes from that catalog.
+This project was built for the SHL AI Intern take-home assignment. The system accepts a stateless conversation history and returns the next assistant reply along with a structured shortlist of SHL assessment recommendations.
 
-## API
+---
 
-### Health
+## Problem Statement
+
+Recruiters and hiring managers often describe hiring needs conversationally instead of knowing the exact assessment names they need. This project helps convert a user’s hiring context into a shortlist of relevant SHL assessments.
+
+The recommender supports:
+
+- Clarifying vague requests
+- Recommending 1–10 SHL assessments
+- Refining recommendations when the user changes constraints
+- Comparing SHL assessments
+- Refusing legal, general hiring, non-SHL, and prompt-injection requests
+- Returning only catalog-grounded SHL products and URLs
+
+---
+
+## API Endpoints 
+
+### Health Check
 
 ```http
 GET /health
-```
 
 Response:
 
-```json
-{"status": "ok"}
-```
-
-### Chat
-
-```http
+{
+  "status": "ok"
+}
+Chat Endpoint
 POST /chat
-```
 
 Request:
 
-```json
 {
   "messages": [
     {
@@ -35,11 +46,9 @@ Request:
     }
   ]
 }
-```
 
 Response:
 
-```json
 {
   "reply": "Here are SHL assessments that best match the role and requirements you described.",
   "recommendations": [
@@ -51,128 +60,237 @@ Response:
   ],
   "end_of_conversation": false
 }
-```
 
-The response schema is fixed and validated with Pydantic.
+The response schema is fixed and validated using Pydantic.
 
-## Behavior
+Tech Stack
+Python
+FastAPI
+Uvicorn
+Pydantic
+Requests
+Pytest
+SHL product catalog JSON
+Project Structure
+SHLassignment/
+│
+├── app/
+│   ├── __init__.py
+│   ├── main.py
+│   ├── schemas.py
+│   ├── catalog.py
+│   ├── retriever.py
+│   └── comparison.py
+│
+├── data/
+│   ├── raw_catalog.json
+│   └── shl_catalog.json
+│
+├── scripts/
+│   ├── download_catalog.py
+│   └── inspect_catalog.py
+│
+├── tests/
+│   ├── test_api.py
+│   └── test_public_traces.py
+│
+├── requirements.txt
+├── pytest.ini
+└── README.md
+Catalog Source
 
-- Clarifies vague requests before recommending.
-- Recommends 1 to 10 SHL assessments once enough context is available.
-- Uses the full stateless conversation history for refinements.
-- Supports additions/removals such as "add personality", "remove AWS", "drop REST", and "only cognitive".
-- Compares catalog products using aliases such as OPQ, GSA, DSI, and Verify G+.
-- Refuses legal/compliance advice, general hiring advice, non-SHL requests, and prompt-injection attempts.
-- Falls back to deterministic intent handling when no LLM key is configured.
+The recommender uses the SHL product catalog:
 
-## Setup
+https://tcp-us-prod-rnd.shl.com/voiceRater/shl-ai-hiring/shl_product_catalog.json
 
-```bash
-python -m venv .venv
-.venv\Scripts\activate
+The original catalog had invalid control characters, so the download script uses:
+
+json.loads(raw_text, strict=False)
+
+This creates a cleaned local catalog file:
+
+data/shl_catalog.json
+
+The raw downloaded version is also stored as:
+
+data/raw_catalog.json
+Setup Instructions
+1. Clone or open the project
+cd SHLassignment
+2. Install dependencies
 pip install -r requirements.txt
+3. Download the SHL catalog
 python scripts/download_catalog.py
-python -m pytest
-```
-
-Run locally:
-
-```bash
+4. Inspect the catalog
+python scripts/inspect_catalog.py
+5. Run the FastAPI server
 uvicorn app.main:app --reload
-```
 
-Swagger UI:
+Open Swagger UI:
 
-```text
 http://127.0.0.1:8000/docs
-```
+Testing
 
-## Optional LLM Intent Extraction
+Run all tests:
 
-The app can use an LLM only to classify the latest user turn and extract constraints. It never accepts LLM-generated product recommendations.
-
-Environment variables:
-
-```text
-LLM_PROVIDER=groq
-LLM_API_KEY=your_key
-LLM_MODEL=llama-3.1-8b-instant
-LLM_TIMEOUT_SECONDS=6
-```
-
-Supported providers:
-
-- `groq`
-- `gemini`
-
-If these variables are missing or the provider times out, the deterministic fallback handles the request.
-
-## Render Deployment
-
-Use the included `render.yaml`, or create a Render Web Service with:
-
-```bash
-pip install -r requirements.txt
-```
-
-Start command:
-
-```bash
-uvicorn app.main:app --host 0.0.0.0 --port $PORT
-```
-
-Before submitting, verify:
-
-```bash
-curl https://YOUR-RENDER-URL/health
-curl -X POST https://YOUR-RENDER-URL/chat ^
-  -H "Content-Type: application/json" ^
-  -d "{\"messages\":[{\"role\":\"user\",\"content\":\"Hiring graduate financial analysts needing numerical reasoning and finance knowledge\"}]}"
-```
-
-## Tests
-
-```bash
 python -m pytest
-```
 
-Current coverage includes:
+Current test status:
 
-- health endpoint
-- public trace behavior C1 to C10
-- vague-query clarification
-- recommendation/refinement behavior
-- product comparison and aliases
-- legal/general hiring refusal
-- prompt-injection refusal
-- catalog URL/schema validation
+17 passed
 
-Run the lightweight replay probes:
+Test coverage includes:
 
-```bash
-python scripts/replay_public_traces.py
-```
+/health
+vague query clarification
+senior Java/backend engineer recommendation
+OPQ comparison
+legal refusal
+C1–C10 public trace behavior
+OPQ removal refinement
+final conversation handling
+Example Queries
+Vague Query
 
-## Project Structure
+Input:
 
-```text
-app/
-  agent.py       # response pipeline
-  catalog.py     # catalog loading and normalization
-  comparison.py  # product alias resolution and comparison replies
-  intent.py      # LLM/fallback intent extraction
-  llm.py         # optional Groq/Gemini calls
-  main.py        # FastAPI routes
-  retriever.py   # catalog ranking and refinement filters
-  schemas.py     # request/response schemas
-data/
-  raw_catalog.json
-  shl_catalog.json
-scripts/
-  download_catalog.py
-  inspect_catalog.py
-  replay_public_traces.py
-tests/
-  test_api.py
-  test_public_traces.py
-```
+{
+  "messages": [
+    {
+      "role": "user",
+      "content": "I need an assessment"
+    }
+  ]
+}
+
+Expected behavior:
+
+No recommendations
+Ask a clarification question
+Senior Backend Engineer
+
+Input:
+
+{
+  "messages": [
+    {
+      "role": "user",
+      "content": "Hiring a senior full stack engineer with Core Java, Spring, SQL, AWS and Docker"
+    }
+  ]
+}
+
+Expected recommendations include:
+
+Core Java (Advanced Level) (New)
+Spring (New)
+SQL (New)
+Amazon Web Services (AWS) Development (New)
+Docker (New)
+SHL Verify Interactive G+
+Occupational Personality Questionnaire OPQ32r
+Comparison Query
+
+Input:
+
+{
+  "messages": [
+    {
+      "role": "user",
+      "content": "What is the difference between OPQ and OPQ MQ Sales Report?"
+    }
+  ]
+}
+
+Expected behavior:
+
+Compare products using catalog-grounded information
+Return no recommendations
+Keep end_of_conversation as false
+Legal Refusal
+
+Input:
+
+{
+  "messages": [
+    {
+      "role": "user",
+      "content": "Are we legally required under HIPAA to test all staff who touch patient records?"
+    }
+  ]
+}
+
+Expected behavior:
+
+Refuse legal/compliance advice
+Return no recommendations
+Design Approach
+
+The system uses a deterministic, catalog-grounded approach.
+
+Flow
+POST /chat
+   ↓
+Extract latest user message
+   ↓
+Extract full user conversation history
+   ↓
+Check off-scope/legal/prompt-injection requests
+   ↓
+Check comparison requests
+   ↓
+Check vague queries
+   ↓
+Retrieve and rank SHL catalog products
+   ↓
+Apply refinement filters
+   ↓
+Return schema-safe response
+Retrieval Strategy
+
+The current retriever uses:
+
+Preferred product mappings for high-confidence scenarios
+Keyword-based scoring over catalog text
+Noise filtering for irrelevant products
+Explicit exclusion handling for user refinements
+Catalog URL validation through local product data
+
+Examples of supported refinements:
+
+Drop REST
+Remove OPQ
+Add simulation
+Final list: Verify G+ and Graduate Scenarios
+Guardrails
+
+The system refuses:
+
+Legal advice
+Compliance interpretation
+General hiring advice outside SHL assessments
+Non-SHL recommendations
+Prompt-injection attempts
+
+Example refusal:
+
+{
+  "reply": "I can only help with SHL assessment recommendations and comparisons from the SHL catalog. I cannot provide legal, compliance, or non-SHL advice.",
+  "recommendations": [],
+  "end_of_conversation": false
+}
+Public Trace Coverage
+
+The system was tested against the 10 public traces:
+
+Trace	Scenario	Status
+C1	Senior leadership	Passed
+C2	Senior Rust networking engineer	Passed
+C3	Contact center agents	Passed
+C4	Graduate financial analysts	Passed
+C5	Sales re-skilling audit	Passed
+C6	Chemical plant safety	Passed
+C7	Healthcare admin / HIPAA	Passed
+C8	Admin Excel/Word	Passed
+C9	Senior full-stack engineer	Passed
+C10	Graduate management trainee	Passed
