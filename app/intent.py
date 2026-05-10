@@ -278,6 +278,18 @@ def _extract_final_products(text: str) -> list[str]:
     return candidates
 
 
+def is_safety_assessment_query(text: str) -> bool:
+    text_lower = text.lower()
+
+    return (
+        "plant operator" in text_lower
+        or "plant operators" in text_lower
+        or "chemical facility" in text_lower
+        or "chemical plant" in text_lower
+        or ("safety" in text_lower and "procedure compliance" in text_lower)
+    )
+
+
 def _prompt_for_llm(request: ChatRequest) -> str:
     lines = []
 
@@ -337,6 +349,9 @@ def detect_intent(request: ChatRequest) -> Intent:
 
     if is_vague_query(latest):
         return Intent(action="clarify", latest_user_text=latest, user_context=context)
+
+    if is_safety_assessment_query(latest):
+        return Intent(action="recommend", latest_user_text=latest, user_context=context)
 
     if _contains_any(latest_lower, ["add ", "drop ", "remove ", "without ", "only ", "just "]):
         action = "refine"

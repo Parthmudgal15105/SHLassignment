@@ -317,21 +317,13 @@ def search_catalog(
 
     # Safety / plant operator trace
     if any(word in query_lower for word in ["plant", "chemical", "safety", "dependability", "industrial"]):
-        if "industrial" in query_lower:
-            preferred_names.extend(
-                [
-                    "Manufac. & Indust. - Safety & Dependability 8.0",
-                    "Workplace Health and Safety (New)",
-                ]
-            )
-        else:
-            preferred_names.extend(
-                [
-                    "Dependability and Safety Instrument (DSI)",
-                    "Manufac. & Indust. - Safety & Dependability 8.0",
-                    "Workplace Health and Safety (New)",
-                ]
-            )
+        preferred_names.extend(
+            [
+                "Dependability and Safety Instrument (DSI)",
+                "Manufac. & Indust. - Safety & Dependability 8.0",
+                "Workplace Health and Safety (New)",
+            ]
+        )
 
     # Graduate management trainee trace
     if "graduate management trainee" in query_lower or "management trainee" in query_lower:
