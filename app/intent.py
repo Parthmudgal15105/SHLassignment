@@ -87,6 +87,7 @@ def is_refusal_query(text: str) -> bool:
             "ignore above",
             "system prompt",
             "developer message",
+            "developer instructions",
             "reveal your prompt",
             "show your prompt",
             "jailbreak",
@@ -105,7 +106,11 @@ def is_refusal_query(text: str) -> bool:
             "legally",
             "law",
             "compliance requirement",
+            "compliance advice",
             "required under",
+            "are we required",
+            "legally required",
+            "hipaa to test",
             "satisfy that requirement",
             "hipaa requires",
         ],
@@ -133,6 +138,9 @@ def is_vague_query(text: str) -> bool:
     text_lower = text.lower().strip()
     tokens = re.findall(r"[a-z0-9+#.]+", text_lower)
 
+    if _contains_any(text_lower, ["add ", "drop ", "remove ", "without ", "only ", "just "]):
+        return False
+
     vague_phrases = [
         "i need an assessment",
         "need an assessment",
@@ -146,6 +154,29 @@ def is_vague_query(text: str) -> bool:
         return True
 
     if len(tokens) <= 4 and ("assessment" in text_lower or "test" in text_lower):
+        return True
+
+    short_skill_terms = ["java", "python", "sql", "aws", "excel"]
+    role_depth_terms = [
+        "senior",
+        "graduate",
+        "entry",
+        "backend",
+        "full stack",
+        "full-stack",
+        "admin",
+        "spring",
+        "docker",
+        "finance",
+        "sales",
+        "contact",
+    ]
+
+    if (
+        len(tokens) <= 6
+        and _contains_any(text_lower, short_skill_terms)
+        and not _contains_any(text_lower, role_depth_terms)
+    ):
         return True
 
     if (
@@ -267,9 +298,9 @@ def _merge_llm(intent: Intent, data: dict[str, Any] | None) -> Intent:
         return intent
 
     action = data.get("action")
-    valid_actions = {"clarify", "recommend", "refine", "compare", "refuse", "finalize"}
+    valid_actions = {"clarify", "recommend", "refine"}
 
-    if isinstance(action, str) and action in valid_actions:
+    if intent.action == "recommend" and isinstance(action, str) and action in valid_actions:
         intent.action = action
 
     for field_name in ["additions", "removals", "only", "final_products"]:
@@ -288,14 +319,26 @@ def detect_intent(request: ChatRequest) -> Intent:
     latest_lower = latest.lower()
 
     if is_refusal_query(latest):
-        action = "refuse"
-    elif is_comparison_query(latest):
-        action = "compare"
-    elif is_vague_query(latest):
-        action = "clarify"
-    elif is_confirmation(latest):
-        action = "finalize"
-    elif _contains_any(latest_lower, ["add ", "drop ", "remove ", "without ", "only ", "just "]):
+        return Intent(action="refuse", latest_user_text=latest, user_context=context)
+
+    if is_comparison_query(latest):
+        return Intent(action="compare", latest_user_text=latest, user_context=context)
+
+    if is_confirmation(latest):
+        return Intent(
+            action="finalize",
+            latest_user_text=latest,
+            user_context=context,
+            additions=_extract_terms(latest, ["add", "include"]),
+            removals=_extract_terms(latest, ["drop", "remove", "skip", "exclude", "without", "no"]),
+            only=_extract_only_terms(latest),
+            final_products=_extract_final_products(latest),
+        )
+
+    if is_vague_query(latest):
+        return Intent(action="clarify", latest_user_text=latest, user_context=context)
+
+    if _contains_any(latest_lower, ["add ", "drop ", "remove ", "without ", "only ", "just "]):
         action = "refine"
     else:
         action = "recommend"
