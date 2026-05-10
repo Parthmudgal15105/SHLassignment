@@ -1,3 +1,5 @@
+import re
+
 from app.catalog import load_catalog, get_product_name, get_product_url, get_test_type, make_search_text
 
 
@@ -7,6 +9,9 @@ CATALOG = load_catalog()
 ALIASES = {
     "opq": "Occupational Personality Questionnaire OPQ32r",
     "opq32r": "Occupational Personality Questionnaire OPQ32r",
+    "occupational personality questionnaire": "Occupational Personality Questionnaire OPQ32r",
+    "gsa": "Global Skills Assessment",
+    "global skills assessment": "Global Skills Assessment",
     "opq mq sales report": "OPQ MQ Sales Report",
     "mq sales report": "OPQ MQ Sales Report",
     "dsi": "Dependability and Safety Instrument (DSI)",
@@ -18,6 +23,12 @@ ALIASES = {
     "g+": "SHL Verify Interactive G+",
     "graduate scenarios": "Graduate Scenarios",
 }
+
+
+def normalize(value: str) -> str:
+    value = value.lower().replace("–", "-").replace("—", "-")
+    value = re.sub(r"[^a-z0-9+#.& -]+", " ", value)
+    return " ".join(value.split())
 
 
 def is_comparison_query(text: str) -> bool:
@@ -35,20 +46,20 @@ def is_comparison_query(text: str) -> bool:
 
 
 def find_product_by_name_or_alias(name: str):
-    name_lower = name.lower().strip()
+    name_lower = normalize(name)
 
     if name_lower in ALIASES:
-        target_name = ALIASES[name_lower].lower()
+        target_name = normalize(ALIASES[name_lower])
     else:
         target_name = name_lower
 
     for item in CATALOG:
-        product_name = get_product_name(item).lower()
+        product_name = normalize(get_product_name(item))
         if product_name == target_name:
             return item
 
     for item in CATALOG:
-        product_name = get_product_name(item).lower()
+        product_name = normalize(get_product_name(item))
         if target_name in product_name or product_name in target_name:
             return item
 
@@ -56,11 +67,12 @@ def find_product_by_name_or_alias(name: str):
 
 
 def detect_comparison_products(text: str):
-    text_lower = text.lower()
+    text_lower = f" {normalize(text)} "
     found = []
 
-    for alias, product_name in ALIASES.items():
-        if alias in text_lower:
+    for alias, product_name in sorted(ALIASES.items(), key=lambda pair: len(pair[0]), reverse=True):
+        alias_norm = normalize(alias)
+        if re.search(rf"(?<![a-z0-9]){re.escape(alias_norm)}(?![a-z0-9])", text_lower):
             item = find_product_by_name_or_alias(product_name)
             if item and item not in found:
                 found.append(item)
@@ -89,9 +101,6 @@ def build_comparison_reply(text: str) -> str:
     first_url = get_product_url(first)
     second_url = get_product_url(second)
 
-    first_text = make_search_text(first)
-    second_text = make_search_text(second)
-
     reply = (
         f"{first_name} and {second_name} are different SHL catalog products.\n\n"
         f"{first_name}:\n"
@@ -108,6 +117,13 @@ def build_comparison_reply(text: str) -> str:
             "OPQ MQ Sales Report is a sales-focused report/output based on OPQ-style personality data "
             "and sales motivation context. Use OPQ32r as the broad personality instrument, and use the "
             "sales report when the audience needs sales-specific interpretation."
+        )
+    elif "global skills assessment" in second_name.lower() or "global skills assessment" in first_name.lower():
+        reply += (
+            "In practical terms, OPQ32r focuses on personality and behavioral preferences, "
+            "while Global Skills Assessment measures self-reported skills aligned to SHL's "
+            "Universal Competency Framework. Use OPQ for personality insight and GSA for a "
+            "broader skills audit or development baseline."
         )
     elif "dependability and safety instrument" in first_name.lower() and "safety & dependability" in second_name.lower():
         reply += (

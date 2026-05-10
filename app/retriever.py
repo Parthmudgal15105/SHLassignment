@@ -11,6 +11,24 @@ from app.catalog import (
 
 CATALOG = load_catalog()
 
+
+TERM_ALIASES = {
+    "amazon web services": ["aws", "amazon web services"],
+    "aws": ["aws", "amazon web services"],
+    "rest": ["rest", "restful"],
+    "restful": ["rest", "restful"],
+    "opq": ["opq", "occupational personality questionnaire"],
+    "personality": ["opq", "personality"],
+    "simulation": ["simulation"],
+    "technical": ["knowledge & skills", "programming", "coding"],
+    "knowledge": ["knowledge & skills"],
+    "skills": ["knowledge & skills"],
+    "cognitive": ["ability & aptitude", "verify interactive", "numerical", "deductive", "inductive"],
+    "ability": ["ability & aptitude", "verify interactive", "numerical", "deductive", "inductive"],
+    "aptitude": ["ability & aptitude", "verify interactive", "numerical", "deductive", "inductive"],
+}
+
+
 def normalize_key(value: str) -> str:
     return " ".join(value.lower().split())
 
@@ -53,6 +71,36 @@ def find_catalog_item(preferred_name: str):
 
     return None
 
+
+def to_recommendation(item: dict[str, Any]) -> dict[str, str]:
+    return {
+        "name": get_product_name(item),
+        "url": get_product_url(item),
+        "test_type": get_test_type(item),
+    }
+
+
+def product_matches_term(item: dict[str, Any], term: str) -> bool:
+    term_lower = normalize_key(term)
+    aliases = TERM_ALIASES.get(term_lower, [term_lower])
+    haystack = f"{get_product_name(item)} {get_test_type(item)} {make_search_text(item)}".lower()
+
+    return any(alias in haystack for alias in aliases)
+
+
+def product_allowed_by_only(item: dict[str, Any], only_terms: list[str] | None) -> bool:
+    if not only_terms:
+        return True
+
+    return any(product_matches_term(item, term) for term in only_terms)
+
+
+def product_excluded(item: dict[str, Any], exclude_terms: list[str] | None) -> bool:
+    if not exclude_terms:
+        return False
+
+    return any(product_matches_term(item, term) for term in exclude_terms)
+
 KEYWORD_BOOSTS = {
     "java": ["java", "core java", "spring"],
     "spring": ["spring"],
@@ -85,6 +133,7 @@ KEYWORD_BOOSTS = {
     "contact center": ["contact center", "svar", "customer service"],
     "customer service": ["customer service", "contact center"],
     "spoken english": ["svar spoken english"],
+    "gsa": ["global skills assessment"],
 }
 
 
@@ -121,8 +170,19 @@ def score_item(query: str, item: dict[str, Any]) -> int:
     return score
 
 
-def search_catalog(query: str, limit: int = 10) -> list[dict[str, str]]:
+def search_catalog(
+    query: str,
+    limit: int = 10,
+    additions: list[str] | None = None,
+    removals: list[str] | None = None,
+    only: list[str] | None = None,
+    final_products: list[str] | None = None,
+) -> list[dict[str, str]]:
     query_lower = query.lower()
+    additions = additions or []
+    removals = removals or []
+    only = only or []
+    final_products = final_products or []
 
     preferred_names = []
         # Senior leadership / CXO / director trace
@@ -283,6 +343,13 @@ def search_catalog(query: str, limit: int = 10) -> list[dict[str, str]]:
             ]
         )
 
+    if any(term in additions for term in ["personality", "opq"]):
+        preferred_names.append("Occupational Personality Questionnaire OPQ32r")
+
+    if final_products:
+        preferred_names = final_products
+        limit = min(limit, max(1, len(final_products)))
+
     # If user explicitly finalizes Verify G+ and Graduate Scenarios, keep only those
     if (
         "final list" in query_lower
@@ -296,13 +363,14 @@ def search_catalog(query: str, limit: int = 10) -> list[dict[str, str]]:
         limit = 2
 
     # Drop OPQ if user explicitly asks
+    if user_excluded_opq(query_lower) and "opq" not in removals:
+        removals.append("opq")
+
     if (
-        "drop opq" in query_lower
-        or "drop the opq" in query_lower
-        or "remove opq" in query_lower
-        or "remove the opq" in query_lower
-        or "without opq" in query_lower
-    ):      
+        user_excluded_opq(query_lower)
+        or "opq" in removals
+        or "personality" in removals
+    ):
         preferred_names = [
             name for name in preferred_names
             if "OPQ" not in name and "Occupational Personality Questionnaire" not in name
@@ -310,16 +378,19 @@ def search_catalog(query: str, limit: int = 10) -> list[dict[str, str]]:
 
     # Drop REST if user explicitly asks
     if (
-            "drop rest" in query_lower
-            or "drop the rest" in query_lower
-            or "remove rest" in query_lower
-            or "remove the rest" in query_lower
-            or "without rest" in query_lower
-        ):      
-            preferred_names = [
-                name for name in preferred_names
-                if "REST" not in name and "RESTful" not in name
-            ]
+        "drop rest" in query_lower
+        or "drop the rest" in query_lower
+        or "remove rest" in query_lower
+        or "remove the rest" in query_lower
+        or "without rest" in query_lower
+    ) and "rest" not in removals:
+        removals.append("rest")
+
+    if removals:
+        preferred_names = [
+            name for name in preferred_names
+            if not any(term.lower() in name.lower() for term in removals)
+        ]
 
     recommendations = []
     seen_urls = set()
@@ -332,19 +403,16 @@ def search_catalog(query: str, limit: int = 10) -> list[dict[str, str]]:
         
         if "solution" in get_product_name(item).lower():
             continue
+
+        if product_excluded(item, removals) or not product_allowed_by_only(item, only):
+            continue
             
         url = get_product_url(item)
 
         if not url or url in seen_urls:
             continue
 
-        recommendations.append(
-            {
-                "name": get_product_name(item),
-                "url": url,
-                "test_type": get_test_type(item),
-            }
-        )
+        recommendations.append(to_recommendation(item))
         seen_urls.add(url)
 
         if len(recommendations) >= limit:
@@ -381,6 +449,9 @@ def search_catalog(query: str, limit: int = 10) -> list[dict[str, str]]:
                 continue
                 # Exclude pre-packaged Job Solutions from recommendations
         if "solution" in name.lower():
+            continue
+
+        if product_excluded(item, removals) or not product_allowed_by_only(item, only):
             continue
 
         name_lower = name.lower()
@@ -439,13 +510,7 @@ def search_catalog(query: str, limit: int = 10) -> list[dict[str, str]]:
         if url in seen_urls:
             continue
 
-        recommendations.append(
-            {
-                "name": get_product_name(item),
-                "url": url,
-                "test_type": get_test_type(item),
-            }
-        )
+        recommendations.append(to_recommendation(item))
         seen_urls.add(url)
 
         if len(recommendations) >= limit:
